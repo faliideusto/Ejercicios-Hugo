@@ -43,6 +43,22 @@ h1,h2,h3,.osw{font-family:Oswald,Impact,sans-serif;text-transform:uppercase;lett
 .hstat small{display:block;font:600 10.5px Oswald;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
 .hstat b{display:block;font:600 26px Oswald;margin:6px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hstat span{font-size:12px;color:var(--mut)}
+.acct{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 14px}
+.acct b{font:600 13px Oswald;letter-spacing:.06em;text-transform:uppercase}
+.acct button{border:0;background:var(--card2);color:var(--mut);font:600 11px Oswald;letter-spacing:.08em;text-transform:uppercase;padding:7px 11px;border-radius:999px;cursor:pointer}
+.acct button:hover{color:var(--txt)}
+.sync{width:9px;height:9px;border-radius:50%;background:#3ddc84;box-shadow:0 0 8px #3ddc84}
+.sync.busy{background:#ffb020;box-shadow:0 0 8px #ffb020}
+.sync.err{background:#ff5a5a;box-shadow:0 0 8px #ff5a5a}
+.auth{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:20px;overflow:auto;
+  background:radial-gradient(700px 420px at 15% 0%,rgba(255,106,43,.25),transparent 60%),radial-gradient(600px 400px at 100% 100%,rgba(77,163,255,.14),transparent 60%),var(--bg)}
+.auth-card{width:100%;max-width:380px;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:28px 26px;box-shadow:0 30px 80px -30px #000}
+.auth-card h2{font-size:26px;margin:22px 0 16px}
+.auth-card .seg{margin-bottom:18px}
+.auth-card .inp{margin-bottom:14px;font-size:16px}
+.inp.pin{letter-spacing:.5em;font:600 20px Oswald}
+.aerr{min-height:18px;color:#ff8a8a;font-size:13px;margin:-4px 0 4px}
+.auth-card .hint{text-align:center}
 .sect{font-size:14px;letter-spacing:.16em;color:var(--mut);margin:34px 2px 14px}
 .feat{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
 .fcard{position:relative;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px 20px;text-align:left;color:var(--txt);cursor:pointer;transition:.18s}
@@ -156,7 +172,8 @@ select.inp{cursor:pointer}
 .dtab small{display:block;color:var(--mut);font-size:11px;margin-top:2px}
 .dtab b{font:600 14px Oswald;text-transform:uppercase;letter-spacing:.03em}
 .dtab.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
-.vgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;align-items:start}
+.vgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}
+.vgrid>*,.lgrid>*,.kgrid>*{min-width:0}
 #vFilter{flex-wrap:nowrap;overflow-x:auto;margin:10px 0;padding-bottom:6px;scrollbar-width:thin;scrollbar-color:#3a3f48 transparent}
 #vFilter .chip{flex:none;padding:5px 11px;font-size:10.5px}
 .vres{max-height:560px;overflow:auto;display:flex;flex-direction:column;gap:6px;padding-right:4px}
@@ -225,7 +242,7 @@ table.t td{padding:7px 4px;border-bottom:1px solid #24272d;font-variant-numeric:
 .mac i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}
 .mac span{color:var(--mut);font-size:12px}
 .kwarn{margin-top:10px;font-size:12px;color:#ffb4b4;line-height:1.4}
-@media (max-width:1100px){.vgrid{grid-template-columns:1fr 1fr}.vgrid>.vout{grid-column:1/-1}.kcards{grid-template-columns:1fr}.kstats{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:1100px){.vgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.vgrid>.vout{grid-column:1/-1}.kcards{grid-template-columns:1fr}.kstats{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:900px){.vgrid,.lgrid,.kgrid{grid-template-columns:1fr}.row3{grid-template-columns:1fr 1fr}}
 @media (max-width:900px){
   .grid{grid-template-columns:1fr}
@@ -250,7 +267,30 @@ table.t td{padding:7px 4px;border-bottom:1px solid #24272d;font-variant-numeric:
       <button data-tab="log">Seguimiento</button>
       <button data-tab="kcal">Calorías y macros</button>
     </nav>
+    <div class="acct" id="acct" hidden>
+      <span class="sync" id="sync" title=""></span><b id="acctName"></b><button id="logout">Salir</button>
+    </div>
   </header>
+
+  <!-- ===== Acceso ===== -->
+  <div class="auth" id="auth" hidden>
+    <form class="auth-card" id="aForm" autocomplete="on">
+      <div class="brand"><span class="mono">HM</span><span><b>Hugo Monroux</b><small>Training lab</small></span></div>
+      <h2 id="aTitle">Entra en tu cuenta</h2>
+      <div class="seg" id="aMode"><button type="button" data-m="in" class="on">Entrar</button><button type="button" data-m="up">Crear cuenta</button></div>
+      <label class="flab" for="aUser">Usuario</label>
+      <input id="aUser" class="inp" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" required>
+      <label class="flab" for="aPin">PIN · 4 a 6 números</label>
+      <input id="aPin" class="inp pin" name="password" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password" required>
+      <div id="aPin2Wrap" hidden>
+        <label class="flab" for="aPin2">Repite el PIN</label>
+        <input id="aPin2" class="inp pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password">
+      </div>
+      <div class="aerr" id="aErr"></div>
+      <button class="btn full big" id="aGo" type="submit">Entrar</button>
+      <p class="hint">Tus rutinas, entrenos y datos se guardan en tu cuenta: entra con el mismo usuario y PIN en el móvil o en el PC y verás lo mismo.</p>
+    </form>
+  </div>
 
   <!-- ===== Inicio ===== -->
   <div id="tab-home" class="tab">
@@ -1033,6 +1073,7 @@ renderGroups();
 select((location.hash||'').slice(1)||'sentadilla');
 setPlayIcon();resize();requestAnimationFrame(frame);
 </script>
+<script src="supabase-config.js"></script>
 <script src="ejercicios.js"></script>
 <script src="calculadoras.js"></script>
 </body>

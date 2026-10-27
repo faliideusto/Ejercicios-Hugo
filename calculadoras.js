@@ -22,11 +22,13 @@ DB.forEach(e=>{const base=fold(e.n+' '+Object.keys(e.m).map(k=>MGK[k].n).join(' 
   e.s=base+' '+ALIAS.filter(([a])=>base.includes(a)).map(([,b])=>b).join(' ')});
 
 /* ---------- almacenamiento ---------- */
-const KEY='hugo-entreno-v1';
+const KEY='hugo-entreno-v1', SES_KEY='hugo-sesion', PEND_KEY='hugo-pendiente';
+const DEF=()=>({routines:[],active:null,day:0,logs:[],sec:.5,drafts:{},kcal:{sex:'h',age:25,w:75,h:178,bf:'',act:1.55,def:15,sur:10}});
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
-S=Object.assign({routines:[],active:null,day:0,logs:[],sec:.5,drafts:{},kcal:{sex:'h',age:25,w:75,h:178,bf:'',act:1.55,def:15,sur:10}},S||{});
-const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+S=Object.assign(DEF(),S||{});
+const saveLocal=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const persist=()=>{saveLocal();cloudQueue()};
 let toastT;
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)}
 
@@ -41,8 +43,11 @@ const EXAMPLE=[
  ['Torso B',[['Press inclinado con mancuernas',3],['Dominadas pronas',3],['Remo en polea baja (gironda)',3],['Fondos en paralelas (tronco inclinado)',3],['Elevaciones laterales en polea',3],['Curl martillo',3],['Press francés con barra EZ',3]]],
  ['Pierna B',[['Hip thrust con barra',3],['Sentadilla búlgara',3],['Extensión de cuádriceps',3],['Curl femoral tumbado',3],['Elevación de talones sentado',4],['Elevación de piernas colgado',3]]],
 ];
-if(!S.routines.length)newRoutine('Torso / Pierna',EXAMPLE.map(([name,it])=>({name,items:it.map(([n,s])=>({n,s}))})));
-if(!R())S.active=S.routines[0].id;
+function ensureRoutine(){
+  if(!S.routines.length){const r={id:uid(),name:'Torso / Pierna',days:EXAMPLE.map(([name,it])=>({name,items:it.map(([n,s])=>({n,s}))}))};S.routines.push(r);S.active=r.id;S.day=0}
+  if(!R())S.active=S.routines[0].id;
+}
+ensureRoutine();
 
 const musOf=it=>(BYN[it.n]&&BYN[it.n].m)||it.m||{};
 const tagsHTML=m=>Object.entries(m).sort((a,b)=>b[1]-a[1]).map(([k,f])=>
@@ -310,8 +315,111 @@ $('kSex').onclick=e=>{const b=e.target.closest('[data-v]');if(!b)return;S.kcal.s
 for(const[id,f]of[['kAge','age'],['kW','w'],['kH','h'],['kBf','bf'],['kAct','act'],['kDef','def'],['kSur','sur']])
   $(id).addEventListener('input',e=>{S.kcal[f]=e.target.value;persist();renderKcal()});
 
+/* ---------- cuenta en la nube (Supabase, usuario + PIN) ---------- */
+function cloudQueue(){
+  if(!session)return;
+  dirty=true;setPending(true);setSync('busy','Guardando…');
+  clearTimeout(pushT);pushT=setTimeout(cloudPush,1200);
+}
+// Marca persistente: hay cambios de este dispositivo que aún no están en la nube
+function setPending(v){try{v?localStorage.setItem(PEND_KEY,'1'):localStorage.removeItem(PEND_KEY)}catch(e){}}
+function setSync(cls,title){const s=$('sync');s.className='sync'+(cls?' '+cls:'');s.title=title}
+async function rpc(fn,args,keepalive){
+  const headers={'Content-Type':'application/json',apikey:CLOUD.key};
+  if(CLOUD.key.startsWith('eyJ'))headers.Authorization='Bearer '+CLOUD.key; // claves anon antiguas (JWT)
+  const r=await fetch(`${CLOUD.url}/rest/v1/rpc/${fn}`,{method:'POST',headers,body:JSON.stringify(args),keepalive});
+  if(!r.ok)throw new Error('No se pudo conectar con el servidor ('+r.status+')');
+  return r.json();
+}
+async function cloudPush(keepalive){
+  if(!session||!dirty)return;
+  clearTimeout(pushT);
+  const sent=JSON.stringify(S);dirty=false;
+  try{
+    const res=await rpc('guardar',{p_usuario:session.u,p_pin:session.p,p_datos:JSON.parse(sent)},keepalive);
+    if(!res.ok){if(/incorrect/i.test(res.error))return expire(res.error);throw new Error(res.error)}
+    lastSync=res.actualizado;
+    if(!dirty){setPending(false);setSync('','Guardado en tu cuenta')}
+  }catch(err){dirty=true;setSync('err','Sin conexión: se guardará cuando vuelva');clearTimeout(pushT);pushT=setTimeout(cloudPush,15000)}
+}
+// Sustituye los datos locales por los de la cuenta y repinta la pestaña visible
+function applyRemote(datos,actualizado){
+  S=Object.assign(DEF(),datos||{});ensureRoutine();saveLocal();
+  lastSync=actualizado;logSel={r:S.active,d:S.day};pSel=null;
+  const t=Object.keys(TABS).find(k=>!$('tab-'+k).hidden);
+  ({home:renderHome,vol:renderVol,log:renderLog,kcal:renderKcal}[t]||(()=>{}))();
+}
+async function cloudPull(){
+  if(!session||dirty)return;
+  try{const res=await rpc('entrar',{p_usuario:session.u,p_pin:session.p});
+    if(!res.ok)return /incorrect/i.test(res.error)?expire(res.error):null;
+    if(res.actualizado!==lastSync)applyRemote(res.datos,res.actualizado);
+    setSync('','Guardado en tu cuenta');
+  }catch(err){setSync('err','Sin conexión: trabajando con los datos de este dispositivo')}
+}
+function startSession(u,p){
+  session={u,p};try{localStorage.setItem(SES_KEY,JSON.stringify(session))}catch(e){}
+  $('auth').hidden=true;$('acct').hidden=false;$('acctName').textContent=u;
+}
+function expire(msg){
+  session=null;try{localStorage.removeItem(SES_KEY)}catch(e){}
+  $('acct').hidden=true;showAuth('in',msg);
+}
+function showAuth(mode,msg){
+  authMode=mode;$('auth').hidden=false;
+  [...$('aMode').children].forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
+  $('aTitle').textContent=mode==='up'?'Crea tu cuenta':'Entra en tu cuenta';
+  $('aGo').textContent=mode==='up'?'Crear cuenta':'Entrar';
+  $('aPin2Wrap').hidden=mode!=='up';
+  $('aPin').autocomplete=mode==='up'?'new-password':'current-password';
+  $('aErr').textContent=msg||'';
+  setTimeout(()=>$('aUser').focus(),50);
+}
+const CLOUD={url:(window.SUPABASE_URL||'').trim().replace(/\/+$/,''),key:(window.SUPABASE_ANON_KEY||'').trim()};
+let session=null, dirty=false, pushT=null, lastSync=null, authMode='in';
+$('aMode').onclick=e=>{const b=e.target.closest('[data-m]');if(b)showAuth(b.dataset.m)};
+for(const id of['aPin','aPin2'])$(id).addEventListener('input',e=>{e.target.value=e.target.value.replace(/\D/g,'').slice(0,6)});
+$('aForm').onsubmit=async e=>{
+  e.preventDefault();
+  const u=$('aUser').value.trim().toLowerCase(), p=$('aPin').value;
+  if(!/^[a-z0-9_.-]{3,20}$/.test(u))return $('aErr').textContent='Usuario: 3–20 caracteres (letras, números, . _ -), sin espacios';
+  if(!/^\d{4,6}$/.test(p))return $('aErr').textContent='El PIN debe tener entre 4 y 6 números';
+  if(authMode==='up'&&p!==$('aPin2').value)return $('aErr').textContent='Los dos PIN no coinciden';
+  $('aGo').disabled=true;$('aErr').textContent='';
+  try{
+    if(authMode==='up'){
+      const res=await rpc('registrar',{p_usuario:u,p_pin:p,p_datos:S});
+      if(!res.ok)throw new Error(res.error);
+      startSession(u,p);lastSync=res.actualizado;setSync('','Guardado en tu cuenta');toast('Cuenta creada. ¡A entrenar, '+u+'!');
+    }else{
+      const res=await rpc('entrar',{p_usuario:u,p_pin:p});
+      if(!res.ok)throw new Error(res.error);
+      startSession(u,p);
+      if(res.datos)applyRemote(res.datos,res.actualizado);else{dirty=true;cloudPush()}
+      setSync('','Guardado en tu cuenta');toast('Hola de nuevo, '+u);
+    }
+    $('aPin').value=$('aPin2').value='';
+  }catch(err){$('aErr').textContent=err.message}
+  finally{$('aGo').disabled=false}
+};
+$('logout').onclick=async()=>{
+  if(dirty)await cloudPush();
+  if(dirty&&!confirm('Hay cambios que aún no se han subido (sin conexión). Si sales ahora se perderán. ¿Salir igualmente?'))return;
+  session=null;try{for(const k of[SES_KEY,KEY,PEND_KEY])localStorage.removeItem(k)}catch(e){}
+  location.reload();
+};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)cloudPush(true);else cloudPull()});
+addEventListener('online',()=>{if(dirty)cloudPush();else cloudPull()});
+
 /* ---------- arranque ---------- */
 const h=window.INIT_HASH||'';
 const start=Object.keys(TABS).find(k=>TABS[k]===h)||(EX.some(e=>e.id===h)?'sim':'home');
 showTab(start);
+if(CLOUD.url&&CLOUD.key){
+  let ses=null;try{ses=JSON.parse(localStorage.getItem(SES_KEY))}catch(e){}
+  let pending=false;try{pending=!!localStorage.getItem(PEND_KEY)}catch(e){}
+  if(ses&&ses.u&&ses.p){startSession(ses.u,ses.p);setSync('busy','Cargando tu cuenta…');
+    if(pending){dirty=true;cloudPush()}else cloudPull()}
+  else showAuth('in');
+}
 })();
